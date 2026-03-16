@@ -1,0 +1,60 @@
+# ============================================================
+# Baseline SH configuration — no KAN, standard SH colors
+# ============================================================
+
+project:
+  name: "kan_refine_baseline_sh"
+  output_dir: "outputs/baseline_sh"
+  seed: 42
+  device: "cuda"
+
+data:
+  dataset_type: "multiview"
+  data_dir: "data/scene_01"
+  image_width: 400
+  image_height: 400
+  white_background: true
+
+gaussian:
+  num_points: 10000
+  init_method: "random"
+  init_scale: 0.01
+  init_opacity: 0.8
+
+model:
+  type: "sh_baseline"
+  sh_degree: 3
+
+render:
+  backend: "pytorch"
+  near: 0.1
+  far: 100.0
+
+loss:
+  rgb_weight: 1.0
+  rgb_type: "l1"
+  ssim_weight: 0.2
+  depth_weight: 0.0
+  sparsity_weight: 0.0
+  geometry_weight: 0.0
+  opacity_reg_weight: 0.001
+
+train:
+  num_iterations: 5000
+  lr_means: 0.001
+  lr_scales: 0.005
+  lr_opacities: 0.01
+  lr_colors: 0.01
+  lr_rotations: 0.005
+  lr_kan: 0.001
+  lr_decay_rate: 0.1
+  lr_decay_steps: [3000, 4500]
+  batch_size: 1
+  log_interval: 100
+  save_interval: 1000
+  eval_interval: 500
+
+eval:
+  compute_lpips: true
+  export_gaussians: true
+  export_renders: true

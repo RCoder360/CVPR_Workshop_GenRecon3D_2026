@@ -1,0 +1,94 @@
+# ============================================================
+# KAN-Refine — Default Configuration
+# ============================================================
+
+project:
+  name: "kan_refine"
+  output_dir: "outputs"
+  seed: 42
+  device: "cuda"
+
+# --- Data ---------------------------------------------------
+data:
+  dataset_type: "multiview"          # "multiview" | "blender"
+  data_dir: "data/scene_01"
+  image_width: 400
+  image_height: 400
+  white_background: true
+  num_views_train: -1                # -1 = all
+  num_views_eval: -1
+
+# --- Gaussian Initialization --------------------------------
+gaussian:
+  num_points: 10000
+  init_method: "random"              # "random" | "ply" | "sfm"
+  init_ply_path: ""
+  init_scale: 0.01
+  init_opacity: 0.8
+
+# --- Model --------------------------------------------------
+model:
+  type: "kan"                        # "kan" | "sh_baseline"
+  # Spherical Harmonics baseline
+  sh_degree: 3
+  # KAN settings
+  kan:
+    input_dim: 6                     # 3 pos + 3 dir (or encoded)
+    hidden_dims: [64, 64]
+    output_dim: 7                    # 3 rgb + 1 opacity + 3 delta_mean (optional)
+    grid_size: 5
+    spline_order: 3
+    use_positional_encoding: true
+    pe_num_freqs: 4
+    predict_geometry_residuals: false
+
+# --- Rendering ----------------------------------------------
+render:
+  backend: "pytorch"                 # "pytorch" | "gsplat"
+  near: 0.1
+  far: 100.0
+  tile_size: 16
+
+# --- Loss ----------------------------------------------------
+loss:
+  rgb_weight: 1.0
+  rgb_type: "l1"                     # "l1" | "l2" | "huber"
+  ssim_weight: 0.2
+  depth_weight: 0.1
+  sparsity_weight: 0.001
+  geometry_weight: 0.01
+  opacity_reg_weight: 0.001
+
+# --- Training ------------------------------------------------
+train:
+  num_iterations: 5000
+  lr_means: 0.001
+  lr_scales: 0.005
+  lr_opacities: 0.01
+  lr_colors: 0.01
+  lr_rotations: 0.005
+  lr_kan: 0.001
+  lr_decay_rate: 0.1
+  lr_decay_steps: [3000, 4500]
+  batch_size: 1
+  log_interval: 100
+  save_interval: 1000
+  eval_interval: 500
+  densify_interval: 500
+  densify_until: 3000
+  densify_grad_threshold: 0.0002
+  prune_opacity_threshold: 0.01
+
+# --- Evaluation -----------------------------------------------
+eval:
+  compute_lpips: true
+  compute_chamfer: false
+  export_gaussians: true
+  export_renders: true
+
+# --- Viewer ---------------------------------------------------
+viewer:
+  point_size: 2.0
+  background_color: [0.0, 0.0, 0.0]
+  window_width: 1280
+  window_height: 720
