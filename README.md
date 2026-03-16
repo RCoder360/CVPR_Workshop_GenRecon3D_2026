@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # KAN-Refine: Resource-Efficient Geometric Refinement using Kolmogorov-Arnold Networks
 
 > **CVPR GenRecon3D Workshop Submission**
@@ -358,3 +359,6 @@ Coarse 3D Init       ──►  │  Pipeline:       │  ──►    Interacti
 ## 📝 License
 
 This project is for research purposes. See LICENSE for details.
+=======
+# CVPR_Workshop_GenRecon3D_2026
+>>>>>>> 6bb54f063dbb1f620dbcc4f794df4e47122b1e52
