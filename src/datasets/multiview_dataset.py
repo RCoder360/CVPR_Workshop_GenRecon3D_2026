@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import math
 from pathlib import Path
 from typing import Optional
 
@@ -43,6 +44,7 @@ class MultiViewDataset(BaseDataset):
     def __init__(
         self,
         data_dir: str,
+        split: str = "train",
         image_width: int = 400,
         image_height: int = 400,
         white_background: bool = True,
@@ -54,15 +56,15 @@ class MultiViewDataset(BaseDataset):
         self.image_height = image_height
         self.white_background = white_background
         self.device = device
+        self.split = split
+        self.cameras: list[CameraInfo] = []
+        self.image_paths: list[str] = []
 
         # Load camera metadata
         cam_path = self.data_dir / "cameras.json"
-        if not cam_path.exists():
-            # Generate synthetic data for demo / debugging
-            self._views: list[ViewData] = self._generate_synthetic(
-                num_views=8, device=device
-            )
-        else:
+        nerf_train_path = self.data_dir / "transforms_train.json"
+
+        if cam_path.exists():
             with open(cam_path, "r") as f:
                 meta = json.load(f)
             frames = meta["frames"]
@@ -74,6 +76,21 @@ class MultiViewDataset(BaseDataset):
                 img = self._load_image(fr["file_path"])
                 depth = self._load_depth(fr.get("depth_path"))
                 self._views.append(ViewData(camera=cam, image=img, depth=depth, index=i))
+                self.cameras.append(cam)
+                self.image_paths.append(str(self.data_dir / fr["file_path"]))
+        elif nerf_train_path.exists():
+            self._views = self.load_nerf_synthetic(self.data_dir, split=split)
+            if max_views > 0:
+                self._views = self._views[:max_views]
+                self.cameras = self.cameras[:max_views]
+                self.image_paths = self.image_paths[:max_views]
+        else:
+            # Generate synthetic data for demo / debugging
+            self._views: list[ViewData] = self._generate_synthetic(
+                num_views=8, device=device
+            )
+            self.cameras = [v.camera for v in self._views]
+            self.image_paths = ["" for _ in self._views]
 
     # ------------------------------------------------------------------ #
     # Public interface
@@ -129,6 +146,72 @@ class MultiViewDataset(BaseDataset):
         if depth.ndim == 3:
             depth = depth[..., 0]
         return torch.from_numpy(depth).unsqueeze(0)  # (1, H, W)
+
+    def load_nerf_synthetic(self, scene_path: Path, split: str) -> list[ViewData]:
+        """Load NeRF-synthetic data from transforms_<split>.json.
+
+        Expected file layout:
+            scene_path/
+              transforms_train.json
+              transforms_test.json
+              transforms_val.json
+              train/*.png, test/*.png, val/*.png
+        """
+        split = split.lower()
+        if split not in {"train", "test", "val"}:
+            raise ValueError(f"Unsupported split '{split}'. Use train/test/val.")
+
+        transforms_path = scene_path / f"transforms_{split}.json"
+        if not transforms_path.exists():
+            raise FileNotFoundError(f"Missing NeRF transforms file: {transforms_path}")
+
+        with open(transforms_path, "r") as f:
+            meta = json.load(f)
+
+        camera_angle_x = float(meta["camera_angle_x"])
+        frames = meta.get("frames", [])
+
+        width = self.image_width
+        height = self.image_height
+        focal = 0.5 * width / math.tan(camera_angle_x / 2.0)
+
+        views: list[ViewData] = []
+        self.cameras = []
+        self.image_paths = []
+
+        for i, fr in enumerate(frames):
+            rel_file = fr["file_path"]
+            rel_file = rel_file[2:] if rel_file.startswith("./") else rel_file
+            if rel_file.lower().endswith(".png"):
+                rel_png = rel_file
+            else:
+                rel_png = rel_file + ".png"
+
+            image_path = scene_path / rel_png
+
+            c2w_np = np.array(fr["transform_matrix"], dtype=np.float32)
+            c2w = torch.tensor(c2w_np, dtype=torch.float32)
+            w2c = torch.linalg.inv(c2w)
+
+            cam = CameraInfo(
+                c2w=c2w,
+                w2c=w2c,
+                fx=float(focal),
+                fy=float(focal),
+                cx=float(width / 2.0),
+                cy=float(height / 2.0),
+                width=width,
+                height=height,
+                image_path=str(image_path),
+            )
+
+            img = self._load_image(rel_png)
+            views.append(ViewData(camera=cam, image=img, depth=None, index=i))
+
+            self.cameras.append(cam)
+            self.image_paths.append(str(image_path))
+
+        return views
 
     # ------------------------------------------------------------------ #
     # Synthetic data fallback (for quick testing without real images)

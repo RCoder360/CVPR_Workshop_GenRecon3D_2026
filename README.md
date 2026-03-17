@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # KAN-Refine: Resource-Efficient Geometric Refinement using Kolmogorov-Arnold Networks
 
 > **CVPR GenRecon3D Workshop Submission**
@@ -91,6 +90,24 @@ Place your data in `data/scene_01/` following the format in `data/README.md`, th
 python scripts/train.py --config configs/kan_app_geom.yaml --data-dir data/scene_01
 ```
 
+NeRF Synthetic scenes (for example LEGO) are now supported directly with the standard folder structure:
+
+```text
+data/lego/
+  train/
+  test/
+  val/
+  transforms_train.json
+  transforms_test.json
+  transforms_val.json
+```
+
+Use them the same way, by pointing `--data-dir` to the scene root:
+
+```bash
+python scripts/train.py --config configs/kan_app_geom.yaml --data-dir data/lego
+```
+
 ### 4. Evaluate
 
 ```bash
@@ -176,6 +193,11 @@ python src/viewer/viewer.py --scene outputs/scene_01/gaussians.ply --mode html
 
 ## 📋 Data Format
 
+The loader supports two formats and auto-detects them:
+
+1. Project-native multiview format (`cameras.json` present)
+2. NeRF Synthetic format (`transforms_train.json` present)
+
 ### Directory Structure
 
 ```
@@ -205,6 +227,36 @@ data/scene_01/
     }
   ]
 }
+```
+
+### NeRF Synthetic Schema (`transforms_*.json`)
+
+For NeRF Synthetic scenes, camera intrinsics are computed from `camera_angle_x`:
+
+```text
+focal = 0.5 * width / tan(camera_angle_x / 2)
+fx = fy = focal
+cx = width / 2
+cy = height / 2
+```
+
+Each frame contributes:
+
+- `file_path` (resolved to `<scene_root>/<file_path>.png`)
+- `transform_matrix` as camera-to-world pose
+
+Splits are loaded from:
+
+- `train` -> `transforms_train.json`
+- `test` -> `transforms_test.json`
+- `val` -> `transforms_val.json`
+
+Programmatic usage example:
+
+```python
+from src.datasets.multiview_dataset import MultiViewDataset
+
+dataset = MultiViewDataset("data/lego", split="train")
 ```
 
 ---
@@ -359,6 +411,3 @@ Coarse 3D Init       ──►  │  Pipeline:       │  ──►    Interacti
 ## 📝 License
 
 This project is for research purposes. See LICENSE for details.
-=======
-# CVPR_Workshop_GenRecon3D_2026
->>>>>>> 6bb54f063dbb1f620dbcc4f794df4e47122b1e52
