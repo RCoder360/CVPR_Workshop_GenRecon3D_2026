@@ -114,7 +114,7 @@ class GaussianRenderer(RendererInterface):
         transmittance = torch.ones(1, H, W, device=device)
 
         # Process Gaussians in chunks
-        chunk_size = min(512, px.shape[0])
+        chunk_size = 128
         N = px.shape[0]
 
         depth_acc = torch.zeros(1, H, W, device=device)
