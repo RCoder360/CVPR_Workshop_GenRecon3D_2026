@@ -48,6 +48,8 @@ render:
   near: 0.1
   far: 100.0
   tile_size: 16
+  chunk_size: 128
+  multi_gpu: true
 
 # --- Loss ----------------------------------------------------
 loss:

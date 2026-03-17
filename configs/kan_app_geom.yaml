@@ -37,6 +37,8 @@ render:
   backend: "pytorch"
   near: 0.1
   far: 100.0
+  chunk_size: 128
+  multi_gpu: true
 
 loss:
   rgb_weight: 1.0

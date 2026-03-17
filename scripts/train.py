@@ -11,6 +11,8 @@ import os
 import sys
 from pathlib import Path
 
+import torch
+
 # Ensure project root is on the path
 _project_root = str(Path(__file__).resolve().parents[1])
 if _project_root not in sys.path:
@@ -48,6 +50,13 @@ def main():
     # Load config
     config_path = os.path.join(_project_root, args.config) if not os.path.isabs(args.config) else args.config
     cfg = load_config(config_path)
+
+    # GPU diagnostics
+    print(f"[env] GPU count: {torch.cuda.device_count()}")
+    if torch.cuda.is_available():
+        print(f"[env] Current device: {torch.cuda.current_device()}")
+    else:
+        print("[env] Current device: CPU")
 
     # Apply overrides
     if args.data_dir:

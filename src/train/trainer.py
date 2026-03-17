@@ -50,10 +50,18 @@ from ..utils.config import ConfigDict, save_config
 class Trainer:
     """Main training loop for KAN-Refine."""
 
+    def _appearance_module(self):
+        """Return the underlying appearance model (unwrap DataParallel if needed)."""
+        if isinstance(self.appearance_model, nn.DataParallel):
+            return self.appearance_model.module
+        return self.appearance_model
+
     def __init__(self, cfg: ConfigDict, dataset: BaseDataset):
         self.cfg = cfg
         self.dataset = dataset
         self.device = cfg.project.get("device", "cuda")
+        if self.device == "cuda":
+            self.device = "cuda:0"
         if not torch.cuda.is_available():
             self.device = "cpu"
 
@@ -118,15 +126,32 @@ class Trainer:
                 device=self.device,
             )
             self.use_kan = False
+
+        self.num_gpus = torch.cuda.device_count() if torch.cuda.is_available() else 0
+        if self.device.startswith("cuda") and self.num_gpus > 1 and cfg.project.get("use_data_parallel", True):
+            print(f"[init] Using DataParallel on {self.num_gpus} GPUs for appearance model")
+            self.appearance_model = nn.DataParallel(
+                self.appearance_model,
+                device_ids=list(range(self.num_gpus)),
+            )
         print(f"[init] Model type: {model_type}")
 
         # ------------------------------------------------------------ #
         # Renderer
         # ------------------------------------------------------------ #
         r_cfg = cfg.get("render", {})
+        render_chunk_size = r_cfg.get("chunk_size", 128)
+        use_multi_gpu_render = r_cfg.get("multi_gpu", True)
+        render_devices = None
+        if self.device.startswith("cuda") and self.num_gpus > 1 and use_multi_gpu_render:
+            render_devices = list(range(self.num_gpus))
+            print(f"[init] Renderer chunk devices: {render_devices}")
+
         self.renderer = GaussianRenderer(
             near=r_cfg.get("near", 0.1),
             far=r_cfg.get("far", 100.0),
+            chunk_size=render_chunk_size,
+            render_devices=render_devices,
         )
 
         # ------------------------------------------------------------ #
@@ -261,7 +286,8 @@ class Trainer:
             # -------------------------------------------------------- #
             # Loss
             # -------------------------------------------------------- #
-            sparsity_loss = self.appearance_model.sparsity_loss() if hasattr(self.appearance_model, 'sparsity_loss') else None
+            app_module = self._appearance_module()
+            sparsity_loss = app_module.sparsity_loss() if hasattr(app_module, 'sparsity_loss') else None
 
             losses = self.loss_fn(
                 pred_rgb=pred_image,
@@ -396,7 +422,7 @@ class Trainer:
         ckpt = {
             "iteration": iteration,
             "gaussian_state": self.gaussians.state_dict(),
-            "appearance_model": self.appearance_model.state_dict(),
+            "appearance_model": self._appearance_module().state_dict(),
             "optimizer": self.optimizer.state_dict(),
         }
         torch.save(ckpt, path)
@@ -412,7 +438,7 @@ class Trainer:
             opacities=nn.Parameter(gs.opacities.to(self.device)),
             colors=nn.Parameter(gs.colors.to(self.device)),
         )
-        self.appearance_model.load_state_dict(ckpt["appearance_model"])
+        self._appearance_module().load_state_dict(ckpt["appearance_model"])
         print(f"[ckpt] Loaded checkpoint from {path} (iteration {ckpt['iteration']})")
 
     # ================================================================== #

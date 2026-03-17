@@ -23,9 +23,17 @@ from .renderer_interface import RendererInterface, RenderOutput
 class GaussianRenderer(RendererInterface):
     """Pure-PyTorch differentiable Gaussian splatting renderer."""
 
-    def __init__(self, near: float = 0.1, far: float = 100.0):
+    def __init__(
+        self,
+        near: float = 0.1,
+        far: float = 100.0,
+        chunk_size: int = 128,
+        render_devices: Optional[list[int | str]] = None,
+    ):
         self.near = near
         self.far = far
+        self.chunk_size = max(1, int(chunk_size))
+        self.render_devices = render_devices
 
     def render(
         self,
@@ -102,35 +110,53 @@ class GaussianRenderer(RendererInterface):
         # -------------------------------------------------------------- #
         # 5. Rasterize via alpha compositing
         # -------------------------------------------------------------- #
-        # Build pixel grid
-        yy, xx = torch.meshgrid(
-            torch.arange(H, device=device, dtype=torch.float32),
-            torch.arange(W, device=device, dtype=torch.float32),
-            indexing="ij",
-        )  # (H, W) each
-
         # We accumulate in a chunked fashion for memory efficiency
         color_acc = background.view(3, 1, 1).expand(3, H, W).clone()
         transmittance = torch.ones(1, H, W, device=device)
 
         # Process Gaussians in chunks
-        chunk_size = min(512, px.shape[0])
+        chunk_size = min(self.chunk_size, px.shape[0])
         N = px.shape[0]
 
         depth_acc = torch.zeros(1, H, W, device=device)
 
-        for start in range(0, N, chunk_size):
+        if self.render_devices and device.type == "cuda":
+            chunk_devices = [torch.device(f"cuda:{int(d)}") if isinstance(d, int) else torch.device(d)
+                             for d in self.render_devices]
+        else:
+            chunk_devices = [device]
+
+        mesh_cache: dict[torch.device, tuple[torch.Tensor, torch.Tensor]] = {}
+
+        def _meshgrid_for(dev: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+            if dev not in mesh_cache:
+                yy_t, xx_t = torch.meshgrid(
+                    torch.arange(H, device=dev, dtype=torch.float32),
+                    torch.arange(W, device=dev, dtype=torch.float32),
+                    indexing="ij",
+                )
+                mesh_cache[dev] = (yy_t, xx_t)
+            return mesh_cache[dev]
+
+        for chunk_id, start in enumerate(range(0, N, chunk_size)):
             end = min(start + chunk_size, N)
             if not valid_sorted[start:end].any():
                 continue
 
-            px_c = px[start:end]          # (C,)
-            py_c = py[start:end]
-            s_c = scale_2d[start:end]     # (C,)
-            o_c = opacities[start:end]    # (C,)
-            col_c = colors[start:end]     # (C, 3)
-            dep_c = depths_sorted[start:end]  # (C,)
-            v_c = valid_sorted[start:end]
+            chunk_device = chunk_devices[chunk_id % len(chunk_devices)]
+            yy, xx = _meshgrid_for(chunk_device)
+
+            px_c = px[start:end].to(chunk_device)          # (C,)
+            py_c = py[start:end].to(chunk_device)
+            s_c = scale_2d[start:end].to(chunk_device)     # (C,)
+            o_c = opacities[start:end].to(chunk_device)    # (C,)
+            col_c = colors[start:end].to(chunk_device)     # (C, 3)
+            dep_c = depths_sorted[start:end].to(chunk_device)  # (C,)
+            v_c = valid_sorted[start:end].to(chunk_device)
+
+            transmittance_chunk = transmittance.to(chunk_device)
+            color_chunk = torch.zeros(3, H, W, device=chunk_device)
+            depth_chunk = torch.zeros(1, H, W, device=chunk_device)
 
             # Gaussian evaluation: exp(-0.5 * ((x-μ)/σ)^2)
             dx = xx.unsqueeze(0) - px_c.view(-1, 1, 1)   # (C, H, W)
@@ -142,10 +168,14 @@ class GaussianRenderer(RendererInterface):
 
             for i in range(alpha.shape[0]):
                 a = alpha[i:i+1]  # (1, H, W)
-                weight = a * transmittance  # (1, H, W)
-                color_acc += weight * col_c[i].view(3, 1, 1)
-                depth_acc += weight * dep_c[i]
-                transmittance = transmittance * (1.0 - a)
+                weight = a * transmittance_chunk  # (1, H, W)
+                color_chunk += weight * col_c[i].view(3, 1, 1)
+                depth_chunk += weight * dep_c[i]
+                transmittance_chunk = transmittance_chunk * (1.0 - a)
+
+            color_acc = color_acc + color_chunk.to(device)
+            depth_acc = depth_acc + depth_chunk.to(device)
+            transmittance = transmittance_chunk.to(device)
 
         return RenderOutput(
             color=color_acc.clamp(0, 1),
