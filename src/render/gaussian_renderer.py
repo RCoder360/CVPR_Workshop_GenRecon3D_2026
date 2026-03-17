@@ -146,11 +146,11 @@ class GaussianRenderer(RendererInterface):
             chunk_device = chunk_devices[chunk_id % len(chunk_devices)]
             yy, xx = _meshgrid_for(chunk_device)
 
-            px_c = px[start:end].to(chunk_device)          # (C,)
+            px_c = px[start:end].to(chunk_device)              # (C,)
             py_c = py[start:end].to(chunk_device)
-            s_c = scale_2d[start:end].to(chunk_device)     # (C,)
-            o_c = opacities[start:end].to(chunk_device)    # (C,)
-            col_c = colors[start:end].to(chunk_device)     # (C, 3)
+            s_c = scale_2d[start:end].to(chunk_device)         # (C,)
+            o_c = opacities[start:end].to(chunk_device)        # (C,)
+            col_c = colors[start:end].to(chunk_device)         # (C, 3)
             dep_c = depths_sorted[start:end].to(chunk_device)  # (C,)
             v_c = valid_sorted[start:end].to(chunk_device)
 
@@ -158,16 +158,17 @@ class GaussianRenderer(RendererInterface):
             color_chunk = torch.zeros(3, H, W, device=chunk_device)
             depth_chunk = torch.zeros(1, H, W, device=chunk_device)
 
-            # Gaussian evaluation: exp(-0.5 * ((x-μ)/σ)^2)
-            dx = xx.unsqueeze(0) - px_c.view(-1, 1, 1)   # (C, H, W)
-            dy = yy.unsqueeze(0) - py_c.view(-1, 1, 1)   # (C, H, W)
-            sigma = s_c.view(-1, 1, 1)
+            # Evaluate one Gaussian at a time to avoid allocating (C, H, W)
+            # intermediates, which can OOM at high resolution or large chunks.
+            for i in range(px_c.shape[0]):
+                if not bool(v_c[i]):
+                    continue
 
-            gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))  # (C, H, W)
-            alpha = (gauss * o_c.view(-1, 1, 1) * v_c.float().view(-1, 1, 1)).clamp(0, 0.99)
-
-            for i in range(alpha.shape[0]):
-                a = alpha[i:i+1]  # (1, H, W)
+                dx = xx - px_c[i]  # (H, W)
+                dy = yy - py_c[i]  # (H, W)
+                sigma2 = s_c[i] * s_c[i] + 1e-8
+                gauss = torch.exp(-0.5 * (dx * dx + dy * dy) / sigma2)  # (H, W)
+                a = (gauss * o_c[i]).clamp(0, 0.99).unsqueeze(0)  # (1, H, W)
                 weight = a * transmittance_chunk  # (1, H, W)
                 color_chunk += weight * col_c[i].view(3, 1, 1)
                 depth_chunk += weight * dep_c[i]
