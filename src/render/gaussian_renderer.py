@@ -171,7 +171,7 @@ class GaussianRenderer(RendererInterface):
                     transmittance[:, y0:y1, x0:x1] *= torch.prod(
                         (1.0 - alpha), dim=0, keepdim=True
                     )
-                    
+
             sigma = s_c.view(-1, 1, 1)
 
             gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))  # (C, H, W)
@@ -183,11 +183,13 @@ class GaussianRenderer(RendererInterface):
 
             weights = alpha * alpha_cum  # (C, H, W)
 
-            # Accumulate color
-            color_acc += (weights.unsqueeze(1) * col_c.view(-1, 3, 1, 1)).sum(dim=0)
+            color_acc[:, y0:y1, x0:x1] += (
+                weights.unsqueeze(1) * col_c.view(-1, 3, 1, 1)
+            ).sum(dim=0)
 
-            # Accumulate depth
-            depth_acc += (weights * dep_c.view(-1, 1, 1)).sum(dim=0, keepdim=True)
+            depth_acc[:, y0:y1, x0:x1] += (
+                weights * dep_c.view(-1, 1, 1)
+            ).sum(dim=0, keepdim=True)
 
             # Update transmittance
             transmittance = transmittance * torch.prod(1.0 - alpha, dim=0, keepdim=True)
