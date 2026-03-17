@@ -152,12 +152,16 @@ class GaussianRenderer(RendererInterface):
                     gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))
                     alpha = (gauss * o_c.view(-1,1,1) * v_c.float().view(-1,1,1)).clamp(0, 0.99)
 
-                    alpha_cum = torch.cumprod(
-                        torch.cat([torch.ones_like(alpha[:1]), (1.0 - alpha + 1e-8)], dim=0),
-                        dim=0
-                    )[:-1]
+                    trans = torch.ones_like(alpha[:1])  # (1, tileH, tileW)
 
-                    weights = alpha * alpha_cum  # (C, tileH, tileW)
+                    weights_list = []
+
+                    for i in range(alpha.shape[0]):
+                        w = alpha[i:i+1] * trans
+                        weights_list.append(w)
+                        trans = trans * (1.0 - alpha[i:i+1] + 1e-8)
+
+                    weights = torch.cat(weights_list, dim=0)
 
                     # SAFE accumulation (small tensors now)
                     color_acc[:, y0:y1, x0:x1] += (
