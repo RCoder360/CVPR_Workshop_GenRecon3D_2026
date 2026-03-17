@@ -296,3 +296,39 @@ class MultiViewDataset(BaseDataset):
 
             views.append(ViewData(camera=cam, image=image, index=i))
         return views
+
+if __name__ == "__main__":
+    import json
+    import numpy as np
+
+    # 🔁 CHANGE THIS PATH
+    json_path = "data/lego/transforms_train.json"
+
+    with open(json_path, "r") as f:
+        data = json.load(f)
+
+    frames = data["frames"]
+
+    camera_centers = []
+
+    for frame in frames:
+        T = np.array(frame["transform_matrix"])
+
+        R = T[:3, :3]
+        t = T[:3, 3]
+
+        # c2w → w2c
+        R_w2c = R.T
+        t_w2c = -R.T @ t
+
+        # camera center
+        C = -R_w2c.T @ t_w2c
+        camera_centers.append(C)
+
+    camera_centers = np.array(camera_centers)
+
+    print("First 10 camera centers:")
+    print(camera_centers[:10])
+
+    print("\nMin:", camera_centers.min(axis=0))
+    print("Max:", camera_centers.max(axis=0))    

@@ -144,7 +144,7 @@ class GaussianRenderer(RendererInterface):
                 a = alpha[i:i+1]  # (1, H, W)
                 weight = a * transmittance  # (1, H, W)
                 color_acc += weight * col_c[i].view(3, 1, 1)
-                depth_acc += weight * dep_c[start + i]
+                depth_acc += weight * dep_c[i]
                 transmittance = transmittance * (1.0 - a)
 
         return RenderOutput(
