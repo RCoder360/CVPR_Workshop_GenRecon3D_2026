@@ -192,7 +192,7 @@ class GaussianRenderer(RendererInterface):
             ).sum(dim=0, keepdim=True)
 
             # Update transmittance
-            transmittance = transmittance * torch.prod(1.0 - alpha, dim=0, keepdim=True)
+            transmittance[:, y0:y1, x0:x1] *= torch.prod((1.0 - alpha), dim=0, keepdim=True)
 
         return RenderOutput(
             color=color_acc.clamp(0, 1),
