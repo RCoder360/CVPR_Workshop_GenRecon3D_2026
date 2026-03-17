@@ -178,6 +178,7 @@ class MultiViewDataset(BaseDataset):
         views: list[ViewData] = []
         self.cameras = []
         self.image_paths = []
+        camera_centers: list[np.ndarray] = []
 
         for i, fr in enumerate(frames):
             rel_file = fr["file_path"]
@@ -189,9 +190,32 @@ class MultiViewDataset(BaseDataset):
 
             image_path = scene_path / rel_png
 
-            c2w_np = np.array(fr["transform_matrix"], dtype=np.float32)
+            # NeRF provides camera-to-world in OpenGL convention.
+            # Convert explicitly to world-to-camera, then flip Y/Z axes
+            # for OpenCV-style camera coordinates expected by this pipeline.
+            c2w_nerf = np.array(fr["transform_matrix"], dtype=np.float32)
+            R_c2w = c2w_nerf[:3, :3]
+            t_c2w = c2w_nerf[:3, 3]
+
+            R_w2c = R_c2w.T
+            t_w2c = -R_w2c @ t_c2w
+
+            # OpenGL (+X right, +Y up, +Z backward) -> OpenCV (+X right, +Y down, +Z forward)
+            R_w2c[:, 1:3] *= -1.0
+            t_w2c[1:3] *= -1.0
+
+            w2c_np = np.eye(4, dtype=np.float32)
+            w2c_np[:3, :3] = R_w2c
+            w2c_np[:3, 3] = t_w2c
+
+            # Keep c2w/w2c consistent for downstream code paths.
+            c2w_np = np.linalg.inv(w2c_np)
             c2w = torch.tensor(c2w_np, dtype=torch.float32)
-            w2c = torch.linalg.inv(c2w)
+            w2c = torch.tensor(w2c_np, dtype=torch.float32)
+
+            # Camera center debug check: C = -R^T t
+            center = -R_w2c.T @ t_w2c
+            camera_centers.append(center)
 
             cam = CameraInfo(
                 c2w=c2w,
@@ -210,6 +234,17 @@ class MultiViewDataset(BaseDataset):
 
             self.cameras.append(cam)
             self.image_paths.append(str(image_path))
+
+        if camera_centers:
+            centers = np.stack(camera_centers, axis=0)
+            unique_centers = np.unique(np.round(centers, 5), axis=0).shape[0]
+            radii = np.linalg.norm(centers - centers.mean(axis=0, keepdims=True), axis=1)
+            print(
+                f"[data][nerf] split={split} views={len(centers)} unique_centers={unique_centers} "
+                f"radius_mean={radii.mean():.4f} radius_std={radii.std():.4f}"
+            )
+            for i in range(min(3, len(centers))):
+                print(f"[data][nerf] center[{i}] = {centers[i].tolist()}")
 
         return views
 
