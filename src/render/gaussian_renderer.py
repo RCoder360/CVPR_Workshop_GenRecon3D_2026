@@ -133,8 +133,45 @@ class GaussianRenderer(RendererInterface):
             v_c = valid_sorted[start:end]
 
             # Gaussian evaluation: exp(-0.5 * ((x-μ)/σ)^2)
-            dx = xx.unsqueeze(0) - px_c.view(-1, 1, 1)   # (C, H, W)
-            dy = yy.unsqueeze(0) - py_c.view(-1, 1, 1)   # (C, H, W)
+            tile_size = 128  # VERY IMPORTANT
+
+            for y0 in range(0, H, tile_size):
+                y1 = min(y0 + tile_size, H)
+
+                for x0 in range(0, W, tile_size):
+                    x1 = min(x0 + tile_size, W)
+
+                    xx_tile = xx[y0:y1, x0:x1]
+                    yy_tile = yy[y0:y1, x0:x1]
+
+                    dx = xx_tile.unsqueeze(0) - px_c.view(-1, 1, 1)
+                    dy = yy_tile.unsqueeze(0) - py_c.view(-1, 1, 1)
+
+                    sigma = s_c.view(-1, 1, 1)
+
+                    gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))
+                    alpha = (gauss * o_c.view(-1,1,1) * v_c.float().view(-1,1,1)).clamp(0, 0.99)
+
+                    alpha_cum = torch.cumprod(
+                        torch.cat([torch.ones_like(alpha[:1]), (1.0 - alpha + 1e-8)], dim=0),
+                        dim=0
+                    )[:-1]
+
+                    weights = alpha * alpha_cum  # (C, tileH, tileW)
+
+                    # SAFE accumulation (small tensors now)
+                    color_acc[:, y0:y1, x0:x1] += (
+                        weights.unsqueeze(1) * col_c.view(-1, 3, 1, 1)
+                    ).sum(dim=0)
+
+                    depth_acc[:, y0:y1, x0:x1] += (
+                        weights * dep_c.view(-1, 1, 1)
+                    ).sum(dim=0, keepdim=True)
+
+                    transmittance[:, y0:y1, x0:x1] *= torch.prod(
+                        (1.0 - alpha), dim=0, keepdim=True
+                    )
+                    
             sigma = s_c.view(-1, 1, 1)
 
             gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))  # (C, H, W)
