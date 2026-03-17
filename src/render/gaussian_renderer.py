@@ -140,12 +140,20 @@ class GaussianRenderer(RendererInterface):
             gauss = torch.exp(-0.5 * (dx**2 + dy**2) / (sigma**2 + 1e-8))  # (C, H, W)
             alpha = (gauss * o_c.view(-1, 1, 1) * v_c.float().view(-1, 1, 1)).clamp(0, 0.99)
 
-            for i in range(alpha.shape[0]):
-                a = alpha[i:i+1]  # (1, H, W)
-                weight = a * transmittance  # (1, H, W)
-                color_acc += weight * col_c[i].view(3, 1, 1)
-                depth_acc += weight * dep_c[i]
-                transmittance = transmittance * (1.0 - a)
+            # Compute weights cumulatively
+            alpha_cum = torch.cumprod(
+            torch.cat([torch.ones_like(alpha[:1]), (1.0 - alpha + 1e-8)], dim=0),dim=0)[:-1]
+
+            weights = alpha * alpha_cum  # (C, H, W)
+
+            # Accumulate color
+            color_acc += (weights.unsqueeze(1) * col_c.view(-1, 3, 1, 1)).sum(dim=0)
+
+            # Accumulate depth
+            depth_acc += (weights * dep_c.view(-1, 1, 1)).sum(dim=0, keepdim=True)
+
+            # Update transmittance
+            transmittance = transmittance * torch.prod(1.0 - alpha, dim=0, keepdim=True)
 
         return RenderOutput(
             color=color_acc.clamp(0, 1),
